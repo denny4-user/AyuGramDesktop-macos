@@ -51,6 +51,8 @@ jobs:
           sudo mdutil -a -i off || true
 
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          # Report every compile error in one run, not only the first one.
+          defaults write com.apple.dt.Xcode IDEBuildingContinueBuildingAfterErrors -bool YES
           xcodebuild -version
           df -h .
 
