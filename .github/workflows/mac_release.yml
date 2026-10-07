@@ -129,7 +129,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd $REPO_NAME
-          TAG=v$VERSION
+          # A tag push publishes into its own release, a manual run into v<version>.
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then TAG=$GITHUB_REF_NAME; else TAG=v$VERSION; fi
           gh release view $TAG >/dev/null 2>&1 || gh release create $TAG \
             --target "$GITHUB_SHA" \
             --title "AyuGram $VERSION (macOS)" \
