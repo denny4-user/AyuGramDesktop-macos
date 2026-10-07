@@ -32,6 +32,12 @@ public:
 	~Domain();
 
 	[[nodiscard]] StartResult start(const QByteArray &passcode);
+
+	// AyuGram: start with a local key decrypted by an account code.
+	[[nodiscard]] StartResult startWithLocalKey(
+		const MTP::AuthKeyPtr &localKey);
+	[[nodiscard]] MTP::AuthKeyPtr localKey() const;
+	[[nodiscard]] const QString &dataName() const;
 	void startAdded(
 		not_null<Main::Account*> account,
 		std::unique_ptr<MTP::Config> config);
@@ -55,7 +61,9 @@ private:
 		Empty,
 	};
 
-	[[nodiscard]] StartModernResult startModern(const QByteArray &passcode);
+	[[nodiscard]] StartModernResult startModern(
+		const QByteArray &passcode,
+		MTP::AuthKeyPtr knownLocalKey = nullptr);
 	void startWithSingleAccount(
 		const QByteArray &passcode,
 		std::unique_ptr<Main::Account> account);

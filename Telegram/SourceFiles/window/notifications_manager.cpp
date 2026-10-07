@@ -448,6 +448,12 @@ void System::schedule(Data::ItemNotification notification) {
 	const auto item = notification.item;
 	const auto type = notification.type;
 	const auto thread = item->notificationThread();
+	if (!Core::App().domain().isAccountVisible(
+			&item->history()->session().account())) {
+		// AyuGram: no notifications from accounts hidden by an account code.
+		thread->popNotification(notification);
+		return;
+	}
 	const auto skip = skipNotification(notification);
 	if (skip.value == SkipState::Skip) {
 		thread->popNotification(notification);
@@ -1262,7 +1268,7 @@ TextWithEntities Manager::addTargetAccountName(
 		TextWithEntities title,
 		not_null<Main::Session*> session) {
 	const auto add = [&] {
-		for (const auto &[index, account] : Core::App().domain().accounts()) {
+		for (const auto &account : Core::App().domain().orderedAccounts()) {
 			if (const auto other = account->maybeSession()) {
 				if (other != session) {
 					return true;

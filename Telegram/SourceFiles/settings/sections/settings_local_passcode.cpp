@@ -35,6 +35,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 
+// AyuGram includes
+#include "ayu/features/account_codes/account_codes.h"
+#include "ayu/ui/boxes/account_codes_box.h"
+#include "ui/layers/generic_box.h"
+
 namespace Settings {
 namespace {
 
@@ -217,6 +222,18 @@ void LocalPasscodeEnter::setupContent() {
 						error->setText(tr::lng_passcode_is_same(tr::now));
 						return;
 					}
+				}
+				if (AyuFeatures::AccountCodes::IsUsed(
+						&controller()->session().domain(),
+						newText.toUtf8())) {
+					newPasscode->setFocus();
+					newPasscode->showError();
+					newPasscode->selectAll();
+					error->show();
+					error->setText(AyuFeatures::AccountCodes::Tr(
+						"This code is already set for an account.",
+						"Этот код уже задан для одного из аккаунтов."));
+					return;
 				}
 				SetPasscode(controller(), newText);
 				if (isCreate) {
@@ -425,6 +442,21 @@ void BuildManageContent(SectionBuilder &builder) {
 			const auto box = controller->show(Box<AutoLockBox>());
 			box->boxClosing(
 			) | rpl::start_to_stream(state->autoLockBoxClosing, box->lifetime());
+		});
+	}
+
+	// AyuGram: per-account codes, hidden while only one account is shown.
+	if (!Core::App().domain().restrictedTo()) {
+		builder.addButton({
+			.id = u"passcode/account-codes"_q,
+			.title = rpl::single(AyuFeatures::AccountCodes::Tr(
+				"Account codes",
+				"Коды аккаунтов")),
+			.icon = { &st::menuIconProfile },
+			.onClick = [=] {
+				controller->show(Box(AccountCodesBox, controller));
+			},
+			.keywords = { u"account"_q, u"code"_q, u"hidden"_q },
 		});
 	}
 

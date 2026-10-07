@@ -173,7 +173,7 @@ MainMenu::ToggleAccountsButton::ToggleAccountsButton(
 	}, lifetime());
 
 	auto &settings = Core::App().settings();
-	if (Core::App().domain().accounts().size() < 2
+	if (Core::App().domain().orderedAccounts().size() < 2
 		&& settings.mainMenuAccountsShown()) {
 		settings.setMainMenuAccountsShown(false);
 	}
@@ -1097,7 +1097,8 @@ OthersUnreadState OtherAccountsUnreadStateCurrent(
 	auto counter = 0;
 	auto allMuted = true;
 	for (const auto &[index, account] : domain.accounts()) {
-		if (account.get() == current) {
+		if (account.get() == current
+			|| !domain.isAccountVisible(account.get())) {
 			continue;
 		} else if (const auto session = account->maybeSession()) {
 			counter += session->data().unreadWithMentionsBadge();

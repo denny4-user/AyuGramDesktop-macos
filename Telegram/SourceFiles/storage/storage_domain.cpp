@@ -15,6 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "base/random.h"
 
+// AyuGram includes
+#include "ayu/features/account_codes/account_codes.h"
+
 namespace Storage {
 namespace {
 
@@ -59,6 +62,29 @@ StartResult Domain::start(const QByteArray &passcode) {
 		startWithSingleAccount(passcode, std::move(legacy));
 	}
 	return result;
+}
+
+StartResult Domain::startWithLocalKey(const MTP::AuthKeyPtr &localKey) {
+	Expects(localKey != nullptr);
+
+	// Never fall back to startFromScratch() here: a failure only means
+	// that the account code does not match the stored data.
+	const auto modern = startModern(QByteArray(), localKey);
+	if (modern != StartModernResult::Success) {
+		return StartResult::IncorrectPasscode;
+	}
+	if (_oldVersion < AppVersion) {
+		writeAccounts();
+	}
+	return StartResult::Success;
+}
+
+MTP::AuthKeyPtr Domain::localKey() const {
+	return _localKey;
+}
+
+const QString &Domain::dataName() const {
+	return _dataName;
 }
 
 void Domain::startAdded(
@@ -115,7 +141,8 @@ void Domain::encryptLocalKey(const QByteArray &passcode) {
 }
 
 Domain::StartModernResult Domain::startModern(
-		const QByteArray &passcode) {
+		const QByteArray &passcode,
+		MTP::AuthKeyPtr knownLocalKey) {
 	const auto name = ComputeKeyName(_dataName);
 
 	FileReadDescriptor keyData;
@@ -134,25 +161,33 @@ Domain::StartModernResult Domain::startModern(
 		LOG(("App Error: bad salt in info file, size: %1").arg(salt.size()));
 		return StartModernResult::Failed;
 	}
-	_passcodeKey = CreateLocalKey(passcode, salt);
+	EncryptedDescriptor info;
+	if (knownLocalKey) {
+		// The passcode key stays unknown, checkPasscode() does not need it.
+		_passcodeKey = nullptr;
+		_localKey = std::move(knownLocalKey);
+		_hasLocalPasscode = true;
+	} else {
+		_passcodeKey = CreateLocalKey(passcode, salt);
 
-	EncryptedDescriptor keyInnerData, info;
-	if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
-		LOG(("App Info: could not decrypt pass-protected key from info file, "
-			"maybe bad password..."));
-		return StartModernResult::IncorrectPasscode;
+		EncryptedDescriptor keyInnerData;
+		if (!DecryptLocal(keyInnerData, keyEncrypted, _passcodeKey)) {
+			LOG(("App Info: could not decrypt pass-protected key from info file, "
+				"maybe bad password..."));
+			return StartModernResult::IncorrectPasscode;
+		}
+		auto key = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
+		if (keyInnerData.stream.status() != QDataStream::Ok
+			|| !keyInnerData.stream.atEnd()) {
+			LOG(("App Error: could not read pass-protected key from info file"));
+			return StartModernResult::Failed;
+		}
+		_localKey = std::make_shared<MTP::AuthKey>(key);
+		_hasLocalPasscode = !passcode.isEmpty();
 	}
-	auto key = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
-	if (keyInnerData.stream.status() != QDataStream::Ok
-		|| !keyInnerData.stream.atEnd()) {
-		LOG(("App Error: could not read pass-protected key from info file"));
-		return StartModernResult::Failed;
-	}
-	_localKey = std::make_shared<MTP::AuthKey>(key);
 
 	_passcodeKeyEncrypted = keyEncrypted;
 	_passcodeKeySalt = salt;
-	_hasLocalPasscode = !passcode.isEmpty();
 
 	if (!DecryptLocal(info, infoEncrypted, _localKey)) {
 		LOG(("App Error: could not decrypt info."));
@@ -245,10 +280,15 @@ void Domain::startFromScratch() {
 
 bool Domain::checkPasscode(const QByteArray &passcode) const {
 	Expects(!_passcodeKeySalt.isEmpty());
-	Expects(_passcodeKey != nullptr);
 
 	const auto checkKey = CreateLocalKey(passcode, _passcodeKeySalt);
-	return checkKey->equals(_passcodeKey);
+	if (_passcodeKey) {
+		return checkKey->equals(_passcodeKey);
+	}
+	// AyuGram: started with an account code, so the passcode key is
+	// unknown. The passcode is right if it decrypts the local key.
+	EncryptedDescriptor keyInnerData;
+	return DecryptLocal(keyInnerData, _passcodeKeyEncrypted, checkKey);
 }
 
 void Domain::setPasscode(const QByteArray &passcode) {
@@ -257,6 +297,10 @@ void Domain::setPasscode(const QByteArray &passcode) {
 
 	encryptLocalKey(passcode);
 	writeAccounts();
+	if (passcode.isEmpty()) {
+		// Account codes make no sense without the main passcode.
+		AyuFeatures::AccountCodes::Clear(_dataName);
+	}
 
 	_passcodeKeyChanged.fire({});
 }

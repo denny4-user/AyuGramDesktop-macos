@@ -28,6 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_domain.h"
 #include "main/main_session_settings.h"
 
+// AyuGram includes
+#include "ayu/features/account_codes/account_codes.h"
+
 namespace Main {
 namespace {
 
@@ -552,6 +555,7 @@ void Account::forcedLogOut() {
 }
 
 void Account::loggedOut() {
+	AyuFeatures::AccountCodes::AccountLoggedOut(this);
 	_loggingOut = false;
 	Media::Player::mixer()->stopAndClear();
 	destroySession(DestroyReason::LoggedOut);

@@ -933,7 +933,7 @@ constexpr auto kDefaultDisplayIndex = -1;
 using NotifyView = Core::Settings::NotifyView;
 
 void BuildMultiAccountSection(SectionBuilder &builder) {
-	if (Core::App().domain().accounts().size() < 2) {
+	if (Core::App().domain().orderedAccounts().size() < 2) {
 		return;
 	}
 

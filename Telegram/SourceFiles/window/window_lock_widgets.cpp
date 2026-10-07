@@ -31,6 +31,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_passcode_box.h"
 #include "styles/style_window_lock_widgets.h"
 
+// AyuGram includes
+#include "ayu/features/account_codes/account_codes.h"
+
 namespace Window {
 namespace {
 
@@ -49,7 +52,12 @@ PasscodeAttempt TryPasscode(const QString &passcode) {
 	const auto correct = domain.started()
 		? domain.local().checkPasscode(utf8)
 		: (domain.start(utf8) == Storage::StartResult::Success);
-	if (!correct) {
+	if (correct) {
+		// AyuGram: the main passcode opens all accounts again.
+		domain.setRestrictedTo(nullptr);
+	} else if (AyuFeatures::AccountCodes::TryUnlock(utf8)) {
+		return PasscodeAttempt::Correct;
+	} else {
 		cSetPasscodeBadTries(cPasscodeBadTries() + 1);
 		cSetPasscodeLastTry(crl::now());
 		return PasscodeAttempt::Wrong;

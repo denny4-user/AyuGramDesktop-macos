@@ -76,7 +76,73 @@ Storage::StartResult Domain::start(const QByteArray &passcode) {
 	return result;
 }
 
+Storage::StartResult Domain::startWithAccountCode(
+		const MTP::AuthKeyPtr &localKey,
+		int accountIndex) {
+	Expects(!started());
+
+	const auto result = _local->startWithLocalKey(localKey);
+	if (result == Storage::StartResult::Success) {
+		if (accountByIndex(accountIndex)) {
+			_accountToActivate = accountIndex;
+		}
+		activateAfterStarting();
+		crl::on_main(&Core::App(), [=] { suggestExportIfNeeded(); });
+	} else {
+		Assert(!started());
+	}
+	return result;
+}
+
+void Domain::setRestrictedTo(Account *account) {
+	if (_restrictedTo == account) {
+		return;
+	}
+	_restrictedTo = account;
+	if (account) {
+		for (const auto &[index, other] : _accounts) {
+			if (other.get() == account) {
+				continue;
+			} else if (const auto window
+					= Core::App().separateWindowFor(not_null(other.get()))) {
+				window->close();
+			}
+		}
+		activate(account);
+		Core::App().notifications().clearAll();
+	}
+	_accountsChanges.fire({});
+	scheduleUpdateUnreadBadge();
+}
+
+Account *Domain::restrictedTo() const {
+	return _restrictedTo;
+}
+
+bool Domain::isAccountVisible(not_null<const Account*> account) const {
+	return !_restrictedTo || (_restrictedTo == account.get());
+}
+
+Account *Domain::accountByIndex(int index) const {
+	for (const auto &[i, account] : _accounts) {
+		if (i == index) {
+			return account.get();
+		}
+	}
+	return nullptr;
+}
+
+std::optional<int> Domain::indexOf(not_null<const Account*> account) const {
+	for (const auto &[index, existing] : _accounts) {
+		if (existing.get() == account.get()) {
+			return index;
+		}
+	}
+	return std::nullopt;
+}
+
 void Domain::finish() {
+	_restrictedTo = nullptr;
 	_accountToActivate = -1;
 	_active.reset(nullptr);
 	base::take(_accounts);
@@ -148,7 +214,9 @@ std::vector<not_null<Account*>> Domain::orderedAccounts() const {
 	const auto order = Core::App().settings().accountsOrder();
 	auto accounts = ranges::views::all(
 		_accounts
-	) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
+	) | ranges::views::filter([&](const Domain::AccountWithIndex &a) {
+		return isAccountVisible(a.account.get());
+	}) | ranges::views::transform([](const Domain::AccountWithIndex &a) {
 		return not_null{ a.account.get() };
 	}) | ranges::to_vector;
 	ranges::stable_sort(accounts, [&](
@@ -245,7 +313,9 @@ void Domain::updateUnreadBadge() {
 	_unreadBadge = 0;
 	_unreadBadgeMuted = true;
 	for (const auto &[index, account] : _accounts) {
-		if (const auto session = account->maybeSession()) {
+		if (!isAccountVisible(account.get())) {
+			continue;
+		} else if (const auto session = account->maybeSession()) {
 			const auto data = &session->data();
 			_unreadBadge += data->unreadBadge();
 			if (!data->unreadBadgeMuted()) {
@@ -316,6 +386,9 @@ not_null<Main::Account*> Domain::add(MTP::Environment environment) {
 }
 
 void Domain::addActivated(MTP::Environment environment, bool newWindow) {
+	if (_restrictedTo) {
+		return;
+	}
 	const auto added = [&](not_null<Main::Account*> account) {
 		if (newWindow) {
 			Core::App().ensureSeparateWindowFor(account);
@@ -469,6 +542,9 @@ void Domain::maybeActivate(not_null<Main::Account*> account) {
 }
 
 void Domain::activate(not_null<Main::Account*> account) {
+	if (!isAccountVisible(account)) {
+		return;
+	}
 	if (const auto window = Core::App().separateWindowFor(account)) {
 		window->activate();
 	}

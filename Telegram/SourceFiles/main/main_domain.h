@@ -17,6 +17,8 @@ enum class StartResult : uchar;
 
 namespace MTP {
 enum class Environment : uchar;
+class AuthKey;
+using AuthKeyPtr = std::shared_ptr<AuthKey>;
 } // namespace MTP
 
 namespace Main {
@@ -39,6 +41,9 @@ public:
 
 	[[nodiscard]] bool started() const;
 	[[nodiscard]] Storage::StartResult start(const QByteArray &passcode);
+	[[nodiscard]] Storage::StartResult startWithAccountCode(
+		const MTP::AuthKeyPtr &localKey,
+		int accountIndex);
 	void resetWithForgottenPasscode();
 	void finish();
 
@@ -74,6 +79,15 @@ public:
 	void activate(not_null<Main::Account*> account);
 	void addActivated(MTP::Environment environment, bool newWindow = false);
 
+	// AyuGram: while restricted, only this account is shown and usable,
+	// other accounts stay hidden until the app is unlocked again.
+	void setRestrictedTo(Account *account);
+	[[nodiscard]] Account *restrictedTo() const;
+	[[nodiscard]] bool isAccountVisible(not_null<const Account*> account) const;
+	[[nodiscard]] Account *accountByIndex(int index) const;
+	[[nodiscard]] std::optional<int> indexOf(
+		not_null<const Account*> account) const;
+
 	// Drops session-less accounts that have no window open for them.
 	void removeRedundantAccounts();
 
@@ -99,6 +113,7 @@ private:
 	std::vector<AccountWithIndex> _accounts;
 	rpl::event_stream<> _accountsChanges;
 	rpl::variable<Account*> _active = nullptr;
+	Account *_restrictedTo = nullptr;
 	int _accountToActivate = -1;
 	int _lastActiveIndex = -1;
 	bool _writeAccountsScheduled = false;
