@@ -30,7 +30,8 @@ namespace {
 
 using namespace AyuFeatures::AccountCodes;
 
-[[nodiscard]] QString StatusText(const std::optional<Info> &info) {
+[[nodiscard]] QString StatusText(
+		const std::optional<AyuFeatures::AccountCodes::Info> &info) {
 	return !info
 		? Tr("Not set", "Не задан")
 		: info->restricted
