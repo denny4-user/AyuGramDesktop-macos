@@ -311,7 +311,7 @@ void SetTracked(not_null<UserData*> user, bool tracked) {
 	}
 }
 
-std::vector<Interval> History(not_null<UserData*> user) {
+std::vector<Interval> UserHistory(not_null<UserData*> user) {
 	const auto tracker = TrackerFor(user);
 	return tracker ? tracker->history(IdOf(user)) : std::vector<Interval>();
 }

@@ -32,7 +32,7 @@ void Start(not_null<Main::Session*> session);
 [[nodiscard]] bool IsTracked(not_null<UserData*> user);
 void SetTracked(not_null<UserData*> user, bool tracked);
 
-[[nodiscard]] std::vector<Interval> History(not_null<UserData*> user);
+[[nodiscard]] std::vector<Interval> UserHistory(not_null<UserData*> user);
 void ClearHistory(not_null<UserData*> user);
 [[nodiscard]] rpl::producer<> Changes(not_null<UserData*> user);
 

@@ -107,7 +107,7 @@ void OnlineHistoryBox(
 		st::boxLabel));
 	label->setSelectable(true);
 	const auto refresh = [=] {
-		label->setText(FormatHistory(History(user)));
+		label->setText(FormatHistory(UserHistory(user)));
 	};
 	refresh();
 	Changes(user) | rpl::on_next(refresh, label->lifetime());
@@ -130,7 +130,7 @@ void FillOnlineTrackerMenu(
 			: Tr("Track online", "Отслеживать онлайн")),
 		[=] { SetTracked(user, !tracked); },
 		&st::menuIconTimer);
-	if (tracked || !History(user).empty()) {
+	if (tracked || !UserHistory(user).empty()) {
 		menu->addAction(
 			Tr("Online history", "История онлайна"),
 			[=] { controller->show(Box(OnlineHistoryBox, user)); },
