@@ -181,6 +181,8 @@ set(ayugram_files
         ayu/ui/message_history/history_section.h
         ayu/ui/boxes/edit_mark_box.cpp
         ayu/ui/boxes/edit_mark_box.h
+        ayu/ui/boxes/online_history_box.cpp
+        ayu/ui/boxes/online_history_box.h
         ayu/ui/boxes/account_codes_box.cpp
         ayu/ui/boxes/account_codes_box.h
         ayu/ui/boxes/font_selector.cpp
@@ -219,6 +221,8 @@ set(ayugram_files
         ayu/features/streamer_mode/platform/win/streamer_mode_win.cpp
         ayu/features/streamer_mode/platform/win/streamer_mode_win.h
         ayu/features/streamer_mode/platform/platform_streamer_mode.h
+        ayu/features/online_tracker/online_tracker.cpp
+        ayu/features/online_tracker/online_tracker.h
         ayu/features/account_codes/account_codes.cpp
         ayu/features/account_codes/account_codes.h
         ayu/features/streamer_mode/streamer_mode.cpp

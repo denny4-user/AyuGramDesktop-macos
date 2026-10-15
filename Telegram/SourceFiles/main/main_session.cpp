@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/online_tracker/online_tracker.h"
 #include "api/api_blocked_peers.h"
 
 
@@ -316,6 +317,8 @@ Session::Session(
 	}, _lifetime);
 
 	InitializeBlockedPeers(this);
+
+	AyuFeatures::OnlineTracker::Start(this);
 }
 
 void Session::appConfigRefreshed() {

@@ -63,6 +63,7 @@ class InputField;
 class LabelWithNumbers;
 class MarqueeLabel;
 class PopupMenu;
+class AbstractButton;
 class RoundButton;
 class StarsRating;
 template <typename Widget>
@@ -186,6 +187,8 @@ private:
 		Source source);
 	void setupSwipeBack(not_null<Window::SessionController*> controller);
 	void setupShowLastSeen(not_null<Window::SessionController*> controller);
+	void setupOnlineTracker(not_null<Window::SessionController*> controller);
+	void bindOnlineTrackerButton();
 	void setupUniqueBadgeTooltip();
 	void hideBadgeTooltip();
 	void setupAnimatedPattern(const QRect &userpicGeometry = QRect());
@@ -308,6 +311,8 @@ private:
 	rpl::variable<int> _statusShift = 0;
 	rpl::producer<TextWithEntities> _customStatus;
 	object_ptr<Ui::FadeWrap<Ui::RoundButton>> _showLastSeen = { nullptr };
+	base::unique_qptr<Ui::AbstractButton> _onlineTrackerButton;
+	base::unique_qptr<Ui::PopupMenu> _onlineTrackerMenu;
 	object_ptr<Ui::RoundButton> _forumButton = { nullptr };
 
 	std::shared_ptr<style::FlatLabel> _statusSt;

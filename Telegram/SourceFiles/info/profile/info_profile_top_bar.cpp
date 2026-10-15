@@ -112,6 +112,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ui/ayu_userpic.h"
+#include "ayu/ui/boxes/online_history_box.h"
 #include "ayu/utils/telegram_helpers.h"
 
 
@@ -492,6 +493,7 @@ TopBar::TopBar(
 
 	if (!_topic) {
 		setupShowLastSeen(controller);
+		setupOnlineTracker(controller);
 	}
 
 	bindStatus();
@@ -3986,7 +3988,46 @@ void TopBar::bindStatus() {
 	}, lifetime());
 }
 
+void TopBar::setupOnlineTracker(
+		not_null<Window::SessionController*> controller) {
+	const auto user = _peer->asUser();
+	if (!user
+		|| user->isSelf()
+		|| user->isBot()
+		|| user->isServiceUser()
+		|| user->isInaccessible()) {
+		return;
+	}
+	// AyuGram: a click on the last seen line opens the online tracker menu.
+	_onlineTrackerButton = base::make_unique_q<Ui::AbstractButton>(this);
+	_onlineTrackerButton->setCursor(style::cur_pointer);
+	_onlineTrackerButton->setClickedCallback([=] {
+		_onlineTrackerMenu = base::make_unique_q<Ui::PopupMenu>(
+			this,
+			st::popupMenuWithIcons);
+		FillOnlineTrackerMenu(_onlineTrackerMenu.get(), controller, user);
+		_onlineTrackerMenu->popup(QCursor::pos());
+	});
+	bindOnlineTrackerButton();
+}
+
+void TopBar::bindOnlineTrackerButton() {
+	const auto button = _onlineTrackerButton.get();
+	if (!button || !_status) {
+		return;
+	}
+	rpl::combine(
+		_status->geometryValue(),
+		_status->shownValue()
+	) | rpl::on_next([=](QRect geometry, bool shown) {
+		button->setGeometry(geometry);
+		button->setVisible(shown);
+		button->raise();
+	}, _status->lifetime());
+}
+
 void TopBar::setupStatusWithRating() {
+	bindOnlineTrackerButton();
 	_status->setAttribute(Qt::WA_TransparentForMouseEvents);
 	if (const auto rating = _starsRating.get()) {
 		_statusShift = rating->widthValue();
