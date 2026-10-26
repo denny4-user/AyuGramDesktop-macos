@@ -2695,7 +2695,7 @@ void Message::paintFromName(
 		nameWidth,
 		st::msgNameFont->height);
 	recordPart(p, item, HidePart::Name, nameRect);
-	if (isHidden(item, HidePart::Name)) {
+	if (AyuFeatures::MessageShot::isHidden(item, HidePart::Name)) {
 		// AyuGram: the name is hidden in a message shot.
 		paintHiddenLines(
 			p,
@@ -3173,7 +3173,7 @@ void Message::paintText(
 			trect.y(),
 			textWidth,
 			int(widths.size()) * lineHeight));
-		if (isHidden(data(), HidePart::Text)) {
+		if (AyuFeatures::MessageShot::isHidden(data(), HidePart::Text)) {
 			paintHiddenLines(
 				p,
 				trect.topLeft(),
