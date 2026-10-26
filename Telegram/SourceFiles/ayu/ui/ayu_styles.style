@@ -28,10 +28,6 @@ botWebViewPanelWidthIncreased: 512px;
 stickerRoundingSize: 5px;
 
 messageShotPadding: 4px;
-messageShotEyeSize: 28px;
-messageShotEyeSkip: 6px;
-messageShotEyeShown: icon {{ "menu/show_in_chat", windowActiveTextFg }};
-messageShotEyeHidden: icon {{ "menu/stealth", menuIconFg }};
 
 topBarAdmins: IconButton {
 	width: 40px;

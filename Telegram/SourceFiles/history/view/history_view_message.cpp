@@ -1750,6 +1750,29 @@ int Message::marginBottom() const {
 	return result;
 }
 
+// AyuGram: an attachment can be hidden in a message shot. The painter is
+// translated to the top left corner of the media here.
+static void PaintHiddenMediaInShot(
+		Painter &p,
+		not_null<const Element*> view,
+		not_null<const Media*> media,
+		const PaintContext &context) {
+	using namespace AyuFeatures::MessageShot;
+	if (!isTakingShot()) {
+		return;
+	}
+	const auto rect = QRect(0, 0, media->width(), media->height());
+	recordPart(p, view->data(), HidePart::Media, rect);
+	if (isHidden(view->data(), HidePart::Media)) {
+		const auto stm = context.messageStyle();
+		paintHiddenRect(
+			p,
+			rect,
+			st::bubbleRadiusSmall,
+			hiddenColor(stm->msgBg->c, stm->historyTextFg->c));
+	}
+}
+
 void Message::draw(Painter &p, const PaintContext &context) const {
 	auto g = countGeometry();
 	if (g.width() < 1) {
@@ -2075,6 +2098,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 			media->draw(p, context.translated(
 				-mediaPosition
 			).withSelection(mediaSelection));
+			PaintHiddenMediaInShot(p, this, media, context);
 			if (context.reactionInfo && !displayInfo && !_reactions) {
 				const auto add = QPoint(0, mediaHeight);
 				context.reactionInfo->position = mediaPosition + add;
@@ -2234,6 +2258,7 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 		media->draw(p, context.translated(
 			-g.topLeft()
 		).withSelection(skipTextSelection(context.selection)));
+		PaintHiddenMediaInShot(p, this, media, context);
 		if (context.reactionInfo && !_reactions) {
 			const auto add = QPoint(0, g.height());
 			context.reactionInfo->position = g.topLeft() + add;
@@ -2377,16 +2402,9 @@ void Message::draw(Painter &p, const PaintContext &context) const {
 				}
 				const auto o = ScopedPainterOpacity(p, progress);
 				const auto &st = st::msgSelectionCheck;
-				const auto right = (delegate()->elementChatMode()
-					== ElementChatMode::Wide)
-					? std::min(
-						int(_bubbleWidthLimit
-							+ st::msgPhotoSkip
-							+ st::msgSelectionOffset
-							+ st::msgPadding.left()
-							+ st.size),
-						width())
-					: width();
+				// AyuGram: keep the checkbox at the right edge of the chat
+				// in the wide mode as well, not next to the bubble limit.
+				const auto right = width();
 				const auto pos = QPoint(
 					(right
 						- (st::msgSelectionOffset * progress - st.size) / 2
@@ -2670,11 +2688,28 @@ void Message::paintFromName(
 		nameLinkHandler,
 		QRect(availableLeft, trect.top(), nameWidth, st::msgNameFont->height),
 		trect.topLeft());
-	nameText->draw(p, {
-		.position = { availableLeft, trect.top() },
-		.availableWidth = nameAvailableWidth,
-		.elisionLines = 1,
-	});
+	using namespace AyuFeatures::MessageShot;
+	const auto nameRect = QRect(
+		availableLeft,
+		trect.top(),
+		nameWidth,
+		st::msgNameFont->height);
+	recordPart(p, item, HidePart::Name, nameRect);
+	if (isHidden(item, HidePart::Name)) {
+		// AyuGram: the name is hidden in a message shot.
+		paintHiddenLines(
+			p,
+			nameRect.topLeft(),
+			{ nameWidth },
+			st::msgNameFont->height,
+			hiddenColor(stm->msgBg->c, stm->historyTextFg->c));
+	} else {
+		nameText->draw(p, {
+			.position = { availableLeft, trect.top() },
+			.availableWidth = nameAvailableWidth,
+			.elisionLines = 1,
+		});
+	}
 	const auto skipWidth = nameWidth
 		+ (_fromNameStatus && !hidePremiumStatuses
 			? (st::dialogsPremiumIcon.icon.width()
@@ -3115,16 +3150,38 @@ void Message::paintText(
 		&& !context.gestureHorizontal.translation) {
 		return;
 	}
-	if (AyuFeatures::MessageShot::isTextHidden(data())) {
-		// AyuGram: the text is hidden in a message shot.
+	if (AyuFeatures::MessageShot::isTakingShot()) {
+		// AyuGram: the text can be hidden in a message shot.
+		using namespace AyuFeatures::MessageShot;
 		const auto width = std::max(textRealWidth(), 1);
-		AyuFeatures::MessageShot::paintHiddenLines(
-			p,
-			trect.topLeft(),
-			text().countLineWidths(width),
-			st::msgFont->height,
-			stm->historyTextFg->c);
-		return;
+		auto widths = text().countLineWidths(width);
+		// The last line ends with the room reserved for the date,
+		// it is not a part of the text.
+		if (!widths.empty() && text().hasSkipBlock()) {
+			widths.back() -= skipBlockWidth();
+			if (widths.back() <= 0) {
+				widths.pop_back();
+			}
+		}
+		const auto lineHeight = st::msgFont->height;
+		auto textWidth = 0;
+		for (const auto lineWidth : widths) {
+			textWidth = std::max(textWidth, lineWidth);
+		}
+		recordPart(p, data(), HidePart::Text, QRect(
+			trect.x(),
+			trect.y(),
+			textWidth,
+			int(widths.size()) * lineHeight));
+		if (isHidden(data(), HidePart::Text)) {
+			paintHiddenLines(
+				p,
+				trect.topLeft(),
+				widths,
+				lineHeight,
+				hiddenColor(stm->msgBg->c, stm->historyTextFg->c));
+			return;
+		}
 	}
 	prepareCustomEmojiPaint(p, context, text());
 

@@ -822,11 +822,6 @@ void Reply::paint(
 
 	y += st::historyReplyTop;
 	const auto rect = QRect(x, y, w, _height);
-	if (AyuFeatures::MessageShot::isTakingShot()) {
-		AyuFeatures::MessageShot::recordReplyRect(
-			view->data(),
-			p.transform().mapRect(rect));
-	}
 	const auto selected = context.selected();
 	const auto backgroundEmojiId = _colorPeer
 		? _colorPeer->backgroundEmojiId()
@@ -1024,6 +1019,22 @@ void Reply::paint(
 						colorIndexPlusOne - 1,
 						colorCollectible)
 					: stm->msgServiceFg->c);
+				using namespace AyuFeatures::MessageShot;
+				const auto nameRect = QRect(
+					x + st::historyReplyPadding.left() + previewSkip,
+					y + st::historyReplyPadding.top(),
+					std::min(namew, _name.maxWidth()),
+					st::msgServiceNameFont->height * (_nameTwoLines ? 2 : 1));
+				recordPart(p, view->data(), HidePart::ReplyName, nameRect);
+				if (isHidden(view->data(), HidePart::ReplyName)) {
+					// AyuGram: the quote author is hidden in a message shot.
+					paintHiddenLines(
+						p,
+						nameRect.topLeft(),
+						{ nameRect.width() },
+						st::msgServiceNameFont->height,
+						hiddenColor(stm->msgBg->c, stm->historyTextFg->c));
+				} else {
 				_name.drawLeftElided(
 					p,
 					x + st::historyReplyPadding.left() + previewSkip,
@@ -1031,6 +1042,7 @@ void Reply::paint(
 					namew,
 					w + 2 * x,
 					_nameTwoLines ? 2 : 1);
+				}
 
 				p.setPen(inBubble
 					? stm->historyTextFg
@@ -1051,29 +1063,49 @@ void Reply::paint(
 					copy->linkFg = owned->color();
 					replyToTextPalette = &*copy;
 				}
-				if (AyuFeatures::MessageShot::isReplyHidden(view->data())) {
-					// AyuGram: the quote is hidden in a message shot.
-					const auto lineHeight = st::normalFont->height;
+				const auto quoteLineHeight = st::normalFont->height;
+				auto quoteWidths = std::vector<int>();
+				if (AyuFeatures::MessageShot::isTakingShot()) {
 					const auto bottom = rect.y()
 						+ _height
 						- st::historyReplyPadding.bottom();
 					const auto lines = std::max(
-						(bottom - textTop) / lineHeight,
+						(bottom - textTop) / quoteLineHeight,
 						1);
-					auto widths = _text.countLineWidths(
+					quoteWidths = _text.countLineWidths(
 						std::max(textw - firstLineSkip, 1));
-					if (widths.empty()) {
-						widths.push_back(textw / 2);
+					if (quoteWidths.empty()) {
+						quoteWidths.push_back(textw / 2);
 					}
-					if (int(widths.size()) > lines) {
-						widths.resize(lines);
+					if (int(quoteWidths.size()) > lines) {
+						quoteWidths.resize(lines);
 					}
+					auto quoteWidth = 0;
+					for (const auto lineWidth : quoteWidths) {
+						quoteWidth = std::max(quoteWidth, lineWidth);
+					}
+					AyuFeatures::MessageShot::recordPart(
+						p,
+						view->data(),
+						AyuFeatures::MessageShot::HidePart::ReplyText,
+						QRect(
+							textLeft + firstLineSkip,
+							textTop,
+							std::min(quoteWidth, textw - firstLineSkip),
+							int(quoteWidths.size()) * quoteLineHeight));
+				}
+				if (AyuFeatures::MessageShot::isHidden(
+						view->data(),
+						AyuFeatures::MessageShot::HidePart::ReplyText)) {
+					// AyuGram: the quote is hidden in a message shot.
 					AyuFeatures::MessageShot::paintHiddenLines(
 						p,
 						QPoint(textLeft + firstLineSkip, textTop),
-						widths,
-						lineHeight,
-						p.pen().color());
+						quoteWidths,
+						quoteLineHeight,
+						AyuFeatures::MessageShot::hiddenColor(
+							stm->msgBg->c,
+							stm->historyTextFg->c));
 				} else {
 				_text.draw(p, {
 					.position = { textLeft, textTop },

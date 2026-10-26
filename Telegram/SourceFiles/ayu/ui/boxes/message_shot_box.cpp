@@ -26,6 +26,8 @@
 #include "styles/style_settings.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
+#include "lang/lang_keys.h"
 #include "ui/abstract_button.h"
 #include "ui/painter.h"
 #include "styles/style_boxes.h"
@@ -37,38 +39,104 @@
 
 namespace {
 
-// A round button next to a message in the preview that hides its text.
-class HideTextButton final : public Ui::AbstractButton {
+[[nodiscard]] QString Tr(const char *en, const char *ru) {
+	return QString::fromUtf8(Lang::Id().startsWith(u"ru"_q) ? ru : en);
+}
+
+// A transparent layer over the preview: highlights the part of a message
+// under the cursor and hides or shows it on click.
+class HideOverlay final : public Ui::RpWidget {
 public:
-	HideTextButton(QWidget *parent, bool hidden)
-	: AbstractButton(parent)
-	, _hidden(hidden) {
-		const auto size = st::messageShotEyeSize;
-		resize(size, size);
-		setCursor(style::cur_pointer);
+	HideOverlay(
+		not_null<ImageView*> view,
+		Fn<void(AyuFeatures::MessageShot::HideTarget)> toggle)
+	: RpWidget(view)
+	, _view(view)
+	, _toggle(std::move(toggle)) {
+		setMouseTracking(true);
+		view->sizeValue() | rpl::on_next([=](QSize size) {
+			setGeometry(QRect(QPoint(), size));
+		}, lifetime());
+		view->imageChanges() | rpl::on_next([=] {
+			const auto position = mapFromGlobal(QCursor::pos());
+			_hovered = std::nullopt;
+			if (rect().contains(position)) {
+				updateHover(position);
+			}
+			update();
+		}, lifetime());
+		show();
 	}
 
 protected:
 	void paintEvent(QPaintEvent *e) override {
+		if (!_hovered) {
+			return;
+		}
 		auto p = QPainter(this);
 		auto hq = PainterHighQualityEnabler(p);
-		auto bg = st::boxBg->c;
-		bg.setAlphaF(isOver() ? 1. : 0.9);
-		p.setPen(Qt::NoPen);
-		p.setBrush(bg);
-		p.drawEllipse(rect());
-		const auto &icon = _hidden
-			? st::messageShotEyeHidden
-			: st::messageShotEyeShown;
-		icon.paintInCenter(p, rect());
+		const auto color = st::windowActiveTextFg->c;
+		auto fill = color;
+		fill.setAlphaF(0.15);
+		p.setPen(QPen(color, st::lineWidth * 2));
+		p.setBrush(fill);
+		const auto margin = st::lineWidth * 3;
+		const auto rect = _hovered->rect.translated(
+			_view->imageRect().topLeft()
+		).marginsAdded({ margin, margin, margin, margin });
+		const auto radius = std::min(
+			st::roundRadiusLarge * 1.,
+			std::min(rect.width(), rect.height()) / 2.);
+		p.drawRoundedRect(rect, radius, radius);
 	}
 
-	void onStateChanged(State was, StateChangeSource source) override {
-		update();
+	void mouseMoveEvent(QMouseEvent *e) override {
+		updateHover(e->pos());
+	}
+
+	void mousePressEvent(QMouseEvent *e) override {
+		updateHover(e->pos());
+		if (_hovered && e->button() == Qt::LeftButton) {
+			_toggle(*_hovered);
+		}
+	}
+
+	void leaveEventHook(QEvent *e) override {
+		if (_hovered) {
+			_hovered = std::nullopt;
+			update();
+		}
+		setCursor(style::cur_default);
 	}
 
 private:
-	const bool _hidden = false;
+	void updateHover(QPoint position) {
+		const auto origin = _view->imageRect().topLeft();
+		auto found = std::optional<AyuFeatures::MessageShot::HideTarget>();
+		auto foundArea = std::numeric_limits<int64>::max();
+		// The smallest part under the cursor wins: a quote over a bubble.
+		for (const auto &target : AyuFeatures::MessageShot::hideTargets()) {
+			const auto rect = target.rect.translated(origin);
+			const auto area = int64(rect.width()) * rect.height();
+			if (rect.contains(position) && area < foundArea) {
+				found = target;
+				foundArea = area;
+			}
+		}
+		const auto same = (found.has_value() == _hovered.has_value())
+			&& (!found
+				|| (found->id == _hovered->id
+					&& found->part == _hovered->part));
+		if (!same) {
+			_hovered = found;
+			update();
+		}
+		setCursor(found ? style::cur_pointer : style::cur_default);
+	}
+
+	const not_null<ImageView*> _view;
+	const Fn<void(AyuFeatures::MessageShot::HideTarget)> _toggle;
+	std::optional<AyuFeatures::MessageShot::HideTarget> _hovered;
 
 };
 
@@ -127,7 +195,16 @@ void MessageShotBox::setupContent() {
 	AddSubsectionTitle(content, tr::ayu_MessageShotPreview());
 
 	const auto imageView = content->add(object_ptr<ImageView>(content), st::imageViewPadding);
-	imageView->setSideReserve(st::messageShotEyeSize + st::messageShotEyeSkip);
+	content->add(
+		object_ptr<Ui::FlatLabel>(
+			content,
+			Tr(
+				"Click a name, text, quote, avatar or attachment "
+				"to hide it in the shot.",
+				"Нажмите на имя, текст, цитату, аватарку или вложение, "
+				"чтобы скрыть их на снимке."),
+			st::boxDividerLabel),
+		st::imageViewPadding);
 
 	AddSkip(content);
 	AddDivider(content);
@@ -267,59 +344,12 @@ void MessageShotBox::setupContent() {
 		});
 	};
 
-	// Eye buttons over the preview: one next to every message with text
-	// and one inside every reply quote. They are not part of the image.
-	using HideButtons = std::vector<base::unique_qptr<HideTextButton>>;
-	const auto hideButtons = content->lifetime().make_state<HideButtons>();
-	const auto rebuildHideButtons = [=] {
-		using namespace AyuFeatures::MessageShot;
-		hideButtons->clear();
-		const auto area = imageView->imageRect();
-		if (area.isEmpty()) {
-			return;
-		}
-		const auto size = st::messageShotEyeSize;
-		const auto skip = st::messageShotEyeSkip;
-		const auto add = [&](QPoint position, bool hidden, Fn<void()> toggle) {
-			auto button = base::make_unique_q<HideTextButton>(
-				imageView,
-				hidden);
-			button->move(position);
-			button->setClickedCallback([=] {
-				toggle();
-				updatePreview();
-			});
-			button->show();
-			hideButtons->push_back(std::move(button));
-		};
-		for (const auto &target : hideTargets()) {
-			const auto id = target.id;
-			if (target.hasText && !target.bubble.isEmpty()) {
-				const auto bubble = target.bubble.translated(area.topLeft());
-				add(
-					QPoint(
-						(target.out
-							? (bubble.x() - skip - size)
-							: (bubble.x() + bubble.width() + skip)),
-						bubble.y() + (bubble.height() - size) / 2),
-					isTextHidden(id),
-					[=] { toggleTextHidden(id); });
-			}
-			if (!target.reply.isEmpty()) {
-				const auto reply = target.reply.translated(area.topLeft());
-				add(
-					QPoint(
-						reply.x() + reply.width() - size - skip / 2,
-						reply.y() + (reply.height() - size) / 2),
-					isReplyHidden(id),
-					[=] { toggleReplyHidden(id); });
-			}
-		}
-	};
-	rpl::merge(
-		imageView->imageChanges(),
-		imageView->sizeValue() | rpl::to_empty
-	) | rpl::on_next(rebuildHideButtons, imageView->lifetime());
+	Ui::CreateChild<HideOverlay>(
+		imageView,
+		[=](AyuFeatures::MessageShot::HideTarget target) {
+			AyuFeatures::MessageShot::toggleHidden(target.id, target.part);
+			updatePreview();
+		});
 
 	if (savedThemeApplyResult == AyuFeatures::MessageShot::SavedThemeApplyResult::AwaitingAsync) {
 		const auto weakBox = base::make_weak(this);
@@ -524,8 +554,7 @@ void MessageShotBox::setupContent() {
 	firstPreviewLatch->await(std::chrono::seconds(1));
 
 	const auto boxWidth = imageView->getImage().width() / style::DevicePixelRatio()
-		+ (st::boxPadding.left() + st::boxPadding.right()) * 4
-		+ 2 * (st::messageShotEyeSize + st::messageShotEyeSkip);
+		+ (st::boxPadding.left() + st::boxPadding.right()) * 4;
 
 	boxClosing() | rpl::on_next(
 		[=]

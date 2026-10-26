@@ -33,6 +33,7 @@
 #include "ui/painter.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/effects/path_shift_gradient.h"
+#include "ui/effects/animation_value.h"
 #include "ui/layers/box_content.h"
 #include "window/themes/window_theme.h"
 
@@ -43,9 +44,8 @@ ShotConfig *config = nullptr;
 bool takingShot = false;
 bool choosingTheme = false;
 
-base::flat_set<FullMsgId> hiddenText;
-base::flat_set<FullMsgId> hiddenReply;
-base::flat_map<FullMsgId, QRect> renderedReplies;
+base::flat_set<std::pair<FullMsgId, HidePart>> hiddenParts;
+std::vector<HideTarget> renderedTargets;
 std::vector<HideTarget> lastTargets;
 
 void setShotConfig(ShotConfig &config) {
@@ -77,37 +77,22 @@ bool isTakingShot() {
 	return takingShot;
 }
 
-bool isTextHidden(not_null<const HistoryItem*> item) {
-	return takingShot && config && hiddenText.contains(item->fullId());
+bool isHidden(not_null<const HistoryItem*> item, HidePart part) {
+	return takingShot && config && hiddenParts.contains({ item->fullId(), part });
 }
 
-bool isReplyHidden(not_null<const HistoryItem*> item) {
-	return takingShot && config && hiddenReply.contains(item->fullId());
+bool isHidden(FullMsgId id, HidePart part) {
+	return hiddenParts.contains({ id, part });
 }
 
-bool isTextHidden(FullMsgId id) {
-	return hiddenText.contains(id);
-}
-
-bool isReplyHidden(FullMsgId id) {
-	return hiddenReply.contains(id);
-}
-
-void toggleTextHidden(FullMsgId id) {
-	if (!hiddenText.remove(id)) {
-		hiddenText.emplace(id);
-	}
-}
-
-void toggleReplyHidden(FullMsgId id) {
-	if (!hiddenReply.remove(id)) {
-		hiddenReply.emplace(id);
+void toggleHidden(FullMsgId id, HidePart part) {
+	if (!hiddenParts.remove({ id, part })) {
+		hiddenParts.emplace(id, part);
 	}
 }
 
 void clearHidden() {
-	hiddenText.clear();
-	hiddenReply.clear();
+	hiddenParts.clear();
 	lastTargets.clear();
 }
 
@@ -115,10 +100,22 @@ std::vector<HideTarget> hideTargets() {
 	return lastTargets;
 }
 
-void recordReplyRect(not_null<const HistoryItem*> item, QRect rect) {
-	if (takingShot && config) {
-		renderedReplies[item->fullId()] = rect;
+void recordPart(
+		QPainter &p,
+		not_null<const HistoryItem*> item,
+		HidePart part,
+		QRect rect) {
+	if (takingShot && config && !rect.isEmpty()) {
+		renderedTargets.push_back({
+			.id = item->fullId(),
+			.part = part,
+			.rect = p.transform().mapRect(rect),
+		});
 	}
+}
+
+QColor hiddenColor(QColor background, QColor text) {
+	return anim::color(background, text, 0.25);
 }
 
 void paintHiddenLines(
@@ -129,28 +126,35 @@ void paintHiddenLines(
 		QColor color) {
 	const auto barHeight = std::max(lineHeight * 11 / 20, 4);
 	const auto radius = barHeight / 2.;
-	color.setAlphaF(color.alphaF() * 0.25);
 
 	PainterHighQualityEnabler hq(p);
 	p.setPen(Qt::NoPen);
 	p.setBrush(color);
 	auto y = topLeft.y() + (lineHeight - barHeight) / 2;
 	for (const auto width : widths) {
-		p.drawRoundedRect(
-			QRectF(topLeft.x(), y, std::max(width, barHeight * 2), barHeight),
-			radius,
-			radius);
+		if (width > 0) {
+			p.drawRoundedRect(
+				QRectF(
+					topLeft.x(),
+					y,
+					std::max(width, barHeight * 2),
+					barHeight),
+				radius,
+				radius);
+		}
 		y += lineHeight;
 	}
 }
 
-bool setChoosingTheme(bool val) {
-	choosingTheme = val;
-	return choosingTheme;
-}
-
-bool isChoosingTheme() {
-	return choosingTheme;
+void paintHiddenRect(QPainter &p, QRect rect, int radius, QColor color) {
+	PainterHighQualityEnabler hq(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	if (radius * 2 >= std::min(rect.width(), rect.height())) {
+		p.drawEllipse(rect);
+	} else {
+		p.drawRoundedRect(rect, radius, radius);
+	}
 }
 
 class MessageShotDelegate final : public HistoryView::DefaultElementDelegate
@@ -414,8 +418,7 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 
 		Painter p(&image);
 
-		renderedReplies.clear();
-		auto targets = std::vector<HideTarget>();
+		renderedTargets.clear();
 
 		// draw the messages
 		int y = 0;
@@ -438,18 +441,24 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 			view->draw(p, context);
 			p.translate(0, -y);
 
-			targets.push_back({
-				.id = message->fullId(),
-				.bubble = view->innerGeometry().translated(0, y),
-				.hasText = !message->originalText().text.isEmpty(),
-				.out = view->hasOutLayout(),
-			});
-
 			if (displayUserpic) {
 				const auto picX = st::msgMargin.left();
 				const auto picY = y + view->height() - st::msgPhotoSize;
+				const auto picRect = QRect(
+					picX,
+					picY,
+					st::msgPhotoSize,
+					st::msgPhotoSize);
+				recordPart(p, message, HidePart::Avatar, picRect);
 
-				if (const auto from = message->displayFrom()) {
+				if (isHidden(message, HidePart::Avatar)) {
+					const auto &stm = st->messageStyle(false, false);
+					paintHiddenRect(
+						p,
+						picRect,
+						st::msgPhotoSize / 2,
+						hiddenColor(stm.msgBg->c, stm.historyTextFg->c));
+				} else if (const auto from = message->displayFrom()) {
 					Dialogs::Ui::PaintUserpic(
 						p,
 						from,
@@ -483,15 +492,10 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 		// Move the recorded geometry to the coordinates of the result.
 		const auto shift = QPoint(st::messageShotPadding, st::messageShotPadding)
 			- cropOffset / style::DevicePixelRatio();
-		for (auto &target : targets) {
-			target.bubble.translate(shift);
-			const auto reply = renderedReplies.find(target.id);
-			if (reply != end(renderedReplies)) {
-				target.reply = reply->second.translated(shift);
-			}
+		for (auto &target : renderedTargets) {
+			target.rect.translate(shift);
 		}
-		lastTargets = std::move(targets);
-		renderedReplies.clear();
+		lastTargets = base::take(renderedTargets);
 		if (!showBackground) {
 			callback(result, final);
 			return;
