@@ -17,6 +17,12 @@ public:
 	void setImage(const QImage &image);
 	QImage getImage() const;
 
+	// Where the current image is drawn, in the widget coordinates.
+	[[nodiscard]] QRect imageRect() const;
+	// Extra space on both sides, for controls drawn next to the image.
+	void setSideReserve(int reserve);
+	[[nodiscard]] rpl::producer<> imageChanges() const;
+
 protected:
 	void paintEvent(QPaintEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
@@ -31,5 +37,7 @@ private:
 	QImage newDiffImage;
 
 	Ui::Animations::Simple animation;
+	int sideReserve = 0;
+	rpl::event_stream<> imageChanged;
 
 };

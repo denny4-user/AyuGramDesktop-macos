@@ -26,11 +26,53 @@
 #include "styles/style_settings.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/abstract_button.h"
+#include "ui/painter.h"
+#include "styles/style_boxes.h"
 #include "ui/wrap/vertical_layout.h"
 
 #include <memory>
 #include <QFileDialog>
 #include <QGuiApplication>
+
+namespace {
+
+// A round button next to a message in the preview that hides its text.
+class HideTextButton final : public Ui::AbstractButton {
+public:
+	HideTextButton(QWidget *parent, bool hidden)
+	: AbstractButton(parent)
+	, _hidden(hidden) {
+		const auto size = st::messageShotEyeSize;
+		resize(size, size);
+		setCursor(style::cur_pointer);
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
+		auto p = QPainter(this);
+		auto hq = PainterHighQualityEnabler(p);
+		auto bg = st::boxBg->c;
+		bg.setAlphaF(isOver() ? 1. : 0.9);
+		p.setPen(Qt::NoPen);
+		p.setBrush(bg);
+		p.drawEllipse(rect());
+		const auto &icon = _hidden
+			? st::messageShotEyeHidden
+			: st::messageShotEyeShown;
+		icon.paintInCenter(p, rect());
+	}
+
+	void onStateChanged(State was, StateChangeSource source) override {
+		update();
+	}
+
+private:
+	const bool _hidden = false;
+
+};
+
+} // namespace
 
 MessageShotBox::MessageShotBox(
 	QWidget *parent,
@@ -74,6 +116,7 @@ void MessageShotBox::setupContent() {
 	}
 
 	AyuFeatures::MessageShot::setShotConfig(_config);
+	AyuFeatures::MessageShot::clearHidden();
 
 	setTitle(rpl::single(tr::ayu_MessageShotTopBarText(tr::now)));
 
@@ -84,6 +127,7 @@ void MessageShotBox::setupContent() {
 	AddSubsectionTitle(content, tr::ayu_MessageShotPreview());
 
 	const auto imageView = content->add(object_ptr<ImageView>(content), st::imageViewPadding);
+	imageView->setSideReserve(st::messageShotEyeSize + st::messageShotEyeSkip);
 
 	AddSkip(content);
 	AddDivider(content);
@@ -222,6 +266,60 @@ void MessageShotBox::setupContent() {
 			firstPreviewLatch->countDown();
 		});
 	};
+
+	// Eye buttons over the preview: one next to every message with text
+	// and one inside every reply quote. They are not part of the image.
+	using HideButtons = std::vector<base::unique_qptr<HideTextButton>>;
+	const auto hideButtons = content->lifetime().make_state<HideButtons>();
+	const auto rebuildHideButtons = [=] {
+		using namespace AyuFeatures::MessageShot;
+		hideButtons->clear();
+		const auto area = imageView->imageRect();
+		if (area.isEmpty()) {
+			return;
+		}
+		const auto size = st::messageShotEyeSize;
+		const auto skip = st::messageShotEyeSkip;
+		const auto add = [&](QPoint position, bool hidden, Fn<void()> toggle) {
+			auto button = base::make_unique_q<HideTextButton>(
+				imageView,
+				hidden);
+			button->move(position);
+			button->setClickedCallback([=] {
+				toggle();
+				updatePreview();
+			});
+			button->show();
+			hideButtons->push_back(std::move(button));
+		};
+		for (const auto &target : hideTargets()) {
+			const auto id = target.id;
+			if (target.hasText && !target.bubble.isEmpty()) {
+				const auto bubble = target.bubble.translated(area.topLeft());
+				add(
+					QPoint(
+						(target.out
+							? (bubble.x() - skip - size)
+							: (bubble.x() + bubble.width() + skip)),
+						bubble.y() + (bubble.height() - size) / 2),
+					isTextHidden(id),
+					[=] { toggleTextHidden(id); });
+			}
+			if (!target.reply.isEmpty()) {
+				const auto reply = target.reply.translated(area.topLeft());
+				add(
+					QPoint(
+						reply.x() + reply.width() - size - skip / 2,
+						reply.y() + (reply.height() - size) / 2),
+					isReplyHidden(id),
+					[=] { toggleReplyHidden(id); });
+			}
+		}
+	};
+	rpl::merge(
+		imageView->imageChanges(),
+		imageView->sizeValue() | rpl::to_empty
+	) | rpl::on_next(rebuildHideButtons, imageView->lifetime());
 
 	if (savedThemeApplyResult == AyuFeatures::MessageShot::SavedThemeApplyResult::AwaitingAsync) {
 		const auto weakBox = base::make_weak(this);
@@ -425,7 +523,9 @@ void MessageShotBox::setupContent() {
 	updatePreview();
 	firstPreviewLatch->await(std::chrono::seconds(1));
 
-	const auto boxWidth = imageView->getImage().width() / style::DevicePixelRatio() + (st::boxPadding.left() + st::boxPadding.right()) * 4;
+	const auto boxWidth = imageView->getImage().width() / style::DevicePixelRatio()
+		+ (st::boxPadding.left() + st::boxPadding.right()) * 4
+		+ 2 * (st::messageShotEyeSize + st::messageShotEyeSkip);
 
 	boxClosing() | rpl::on_next(
 		[=]

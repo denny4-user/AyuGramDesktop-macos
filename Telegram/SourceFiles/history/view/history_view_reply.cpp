@@ -41,6 +41,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/message_shot/message_shot.h"
 
 
 namespace HistoryView {
@@ -821,6 +822,11 @@ void Reply::paint(
 
 	y += st::historyReplyTop;
 	const auto rect = QRect(x, y, w, _height);
+	if (AyuFeatures::MessageShot::isTakingShot()) {
+		AyuFeatures::MessageShot::recordReplyRect(
+			view->data(),
+			p.transform().mapRect(rect));
+	}
 	const auto selected = context.selected();
 	const auto backgroundEmojiId = _colorPeer
 		? _colorPeer->backgroundEmojiId()
@@ -1045,6 +1051,30 @@ void Reply::paint(
 					copy->linkFg = owned->color();
 					replyToTextPalette = &*copy;
 				}
+				if (AyuFeatures::MessageShot::isReplyHidden(view->data())) {
+					// AyuGram: the quote is hidden in a message shot.
+					const auto lineHeight = st::normalFont->height;
+					const auto bottom = rect.y()
+						+ _height
+						- st::historyReplyPadding.bottom();
+					const auto lines = std::max(
+						(bottom - textTop) / lineHeight,
+						1);
+					auto widths = _text.countLineWidths(
+						std::max(textw - firstLineSkip, 1));
+					if (widths.empty()) {
+						widths.push_back(textw / 2);
+					}
+					if (int(widths.size()) > lines) {
+						widths.resize(lines);
+					}
+					AyuFeatures::MessageShot::paintHiddenLines(
+						p,
+						QPoint(textLeft + firstLineSkip, textTop),
+						widths,
+						lineHeight,
+						p.pen().color());
+				} else {
 				_text.draw(p, {
 					.position = { textLeft, textTop },
 					.geometry = textGeometry(textw, firstLineSkip),
@@ -1056,6 +1086,7 @@ void Reply::paint(
 					.pausedSpoiler = pausedSpoiler,
 					.elisionLines = 1,
 				});
+				}
 				p.setTextPalette(stm->textPalette);
 			}
 		} else {

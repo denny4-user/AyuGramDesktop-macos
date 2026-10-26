@@ -3115,6 +3115,17 @@ void Message::paintText(
 		&& !context.gestureHorizontal.translation) {
 		return;
 	}
+	if (AyuFeatures::MessageShot::isTextHidden(data())) {
+		// AyuGram: the text is hidden in a message shot.
+		const auto width = std::max(textRealWidth(), 1);
+		AyuFeatures::MessageShot::paintHiddenLines(
+			p,
+			trect.topLeft(),
+			text().countLineWidths(width),
+			st::msgFont->height,
+			stm->historyTextFg->c);
+		return;
+	}
 	prepareCustomEmojiPaint(p, context, text());
 
 	const auto rippleLinkRange = (_linkRipple && _linkRipple->link)

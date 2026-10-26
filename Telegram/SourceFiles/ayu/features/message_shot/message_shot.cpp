@@ -43,6 +43,11 @@ ShotConfig *config = nullptr;
 bool takingShot = false;
 bool choosingTheme = false;
 
+base::flat_set<FullMsgId> hiddenText;
+base::flat_set<FullMsgId> hiddenReply;
+base::flat_map<FullMsgId, QRect> renderedReplies;
+std::vector<HideTarget> lastTargets;
+
 void setShotConfig(ShotConfig &config) {
 	MessageShot::config = &config;
 }
@@ -70,6 +75,73 @@ bool ignoreRender(RenderPart part) {
 
 bool isTakingShot() {
 	return takingShot;
+}
+
+bool isTextHidden(not_null<const HistoryItem*> item) {
+	return takingShot && config && hiddenText.contains(item->fullId());
+}
+
+bool isReplyHidden(not_null<const HistoryItem*> item) {
+	return takingShot && config && hiddenReply.contains(item->fullId());
+}
+
+bool isTextHidden(FullMsgId id) {
+	return hiddenText.contains(id);
+}
+
+bool isReplyHidden(FullMsgId id) {
+	return hiddenReply.contains(id);
+}
+
+void toggleTextHidden(FullMsgId id) {
+	if (!hiddenText.remove(id)) {
+		hiddenText.emplace(id);
+	}
+}
+
+void toggleReplyHidden(FullMsgId id) {
+	if (!hiddenReply.remove(id)) {
+		hiddenReply.emplace(id);
+	}
+}
+
+void clearHidden() {
+	hiddenText.clear();
+	hiddenReply.clear();
+	lastTargets.clear();
+}
+
+std::vector<HideTarget> hideTargets() {
+	return lastTargets;
+}
+
+void recordReplyRect(not_null<const HistoryItem*> item, QRect rect) {
+	if (takingShot && config) {
+		renderedReplies[item->fullId()] = rect;
+	}
+}
+
+void paintHiddenLines(
+		QPainter &p,
+		QPoint topLeft,
+		const std::vector<int> &widths,
+		int lineHeight,
+		QColor color) {
+	const auto barHeight = std::max(lineHeight * 11 / 20, 4);
+	const auto radius = barHeight / 2.;
+	color.setAlphaF(color.alphaF() * 0.25);
+
+	PainterHighQualityEnabler hq(p);
+	p.setPen(Qt::NoPen);
+	p.setBrush(color);
+	auto y = topLeft.y() + (lineHeight - barHeight) / 2;
+	for (const auto width : widths) {
+		p.drawRoundedRect(
+			QRectF(topLeft.x(), y, std::max(width, barHeight * 2), barHeight),
+			radius,
+			radius);
+		y += lineHeight;
+	}
 }
 
 bool setChoosingTheme(bool val) {
@@ -145,7 +217,9 @@ HistoryView::ElementChatMode MessageShotDelegate::elementChatMode() {
 	return Mode::Wide;
 }
 
-QImage removeEmptySpaceAround(const QImage &original) {
+QImage removeEmptySpaceAround(
+		const QImage &original,
+		QPoint *offset = nullptr) {
 	if (original.isNull()) {
 		return {};
 	}
@@ -172,6 +246,9 @@ QImage removeEmptySpaceAround(const QImage &original) {
 	}
 
 	const QRect bounds(minX, minY, maxX - minX + 1, maxY - minY + 1);
+	if (offset) {
+		*offset = bounds.topLeft();
+	}
 	return original.copy(bounds);
 }
 
@@ -337,6 +414,9 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 
 		Painter p(&image);
 
+		renderedReplies.clear();
+		auto targets = std::vector<HideTarget>();
+
 		// draw the messages
 		int y = 0;
 		for (int i = 0; i < messages.size(); i++) {
@@ -357,6 +437,13 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 			p.translate(0, y);
 			view->draw(p, context);
 			p.translate(0, -y);
+
+			targets.push_back({
+				.id = message->fullId(),
+				.bubble = view->innerGeometry().translated(0, y),
+				.hasText = !message->originalText().text.isEmpty(),
+				.out = view->hasOutLayout(),
+			});
 
 			if (displayUserpic) {
 				const auto picX = st::msgMargin.left();
@@ -390,7 +477,21 @@ void Make(not_null<QWidget*> box, const ShotConfig &config, const Fn<void(QImage
 
 		takingShot = false;
 
-		auto result = addPadding(removeEmptySpaceAround(image));
+		auto cropOffset = QPoint();
+		auto result = addPadding(removeEmptySpaceAround(image, &cropOffset));
+
+		// Move the recorded geometry to the coordinates of the result.
+		const auto shift = QPoint(st::messageShotPadding, st::messageShotPadding)
+			- cropOffset / style::DevicePixelRatio();
+		for (auto &target : targets) {
+			target.bubble.translate(shift);
+			const auto reply = renderedReplies.find(target.id);
+			if (reply != end(renderedReplies)) {
+				target.reply = reply->second.translated(shift);
+			}
+		}
+		lastTargets = std::move(targets);
+		renderedReplies.clear();
 		if (!showBackground) {
 			callback(result, final);
 			return;

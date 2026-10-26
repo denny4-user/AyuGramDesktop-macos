@@ -37,11 +37,14 @@ void ImageView::setImage(const QImage &image) {
 		}
 
 		const auto size = image.size() / style::DevicePixelRatio();
-		setMinimumSize(size.grownBy(st::imageViewInnerPadding));
+		setMinimumSize(size.grownBy(st::imageViewInnerPadding)
+			+ QSize(2 * sideReserve, 0));
 
 		if (this->animation.animating()) {
 			this->animation.stop();
 		}
+
+		imageChanged.fire({});
 
 		if (this->prevImage.isNull()) {
 			update();
@@ -101,6 +104,27 @@ void ImageView::computeDiffImages(const QImage &prev, const QImage &curr) {
 
 QImage ImageView::getImage() const {
 	return image;
+}
+
+QRect ImageView::imageRect() const {
+	if (image.isNull()) {
+		return QRect();
+	}
+	const auto realRect = rect().marginsRemoved(st::imageViewInnerPadding);
+	const auto size = image.size() / style::DevicePixelRatio();
+	return QRect(
+		(realRect.width() - size.width()) / 2 + st::imageViewInnerPadding.left(),
+		(realRect.height() - size.height()) / 2 + st::imageViewInnerPadding.top(),
+		size.width(),
+		size.height());
+}
+
+void ImageView::setSideReserve(int reserve) {
+	sideReserve = reserve;
+}
+
+rpl::producer<> ImageView::imageChanges() const {
+	return imageChanged.events();
 }
 
 void ImageView::paintEvent(QPaintEvent *e) {
