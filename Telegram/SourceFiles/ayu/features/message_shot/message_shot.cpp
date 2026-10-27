@@ -157,6 +157,15 @@ void paintHiddenRect(QPainter &p, QRect rect, int radius, QColor color) {
 	}
 }
 
+bool setChoosingTheme(bool val) {
+	choosingTheme = val;
+	return choosingTheme;
+}
+
+bool isChoosingTheme() {
+	return choosingTheme;
+}
+
 class MessageShotDelegate final : public HistoryView::DefaultElementDelegate
 {
 public:
